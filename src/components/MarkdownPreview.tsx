@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-import { Clipboard, Check } from 'lucide-react';
+import { useState } from 'react';
 
 interface MarkdownPreviewProps {
   markdown: string;
@@ -15,94 +14,69 @@ export function MarkdownPreview({ markdown }: MarkdownPreviewProps) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const decodeHTMLEntities = (text: string): string => {
-    const textarea = document.createElement('textarea');
-    textarea.innerHTML = text;
-    return textarea.value;
+  const decodeHTML = (text: string): string => {
+    const el = document.createElement('textarea');
+    el.innerHTML = text;
+    return el.value;
   };
 
-  // Basic markdown rendering (you might want to use a proper markdown library for production)
   const renderMarkdown = (text: string) => {
-    return text.split('\n').map((origLine, i) => {
-      const line = decodeHTMLEntities(origLine);
-      if (line.startsWith('# ')) {
-        return <h1 key={i} className="text-2xl font-bold mb-4">{line.slice(2)}</h1>;
-      }
-      if (line.startsWith('## ')) {
-        return <h2 key={i} className="text-xl font-bold mb-3">{line.slice(3)}</h2>;
-      }
-      if (line.startsWith('**') && line.endsWith('**')) {
-        return <strong key={i} className="block mb-2">{line.slice(2, -2)}</strong>;
-      }
-      if (line.startsWith('*') && line.endsWith('*')) {
-        return <em key={i} className="block mb-2">{line.slice(1, -1)}</em>;
-      }
-      if (line === '---') {
-        return <hr key={i} className="my-4" />;
-      }
+    return text.split('\n').map((raw, i) => {
+      const line = decodeHTML(raw);
+      if (line.startsWith('# ')) return <h1 key={i}>{line.slice(2)}</h1>;
+      if (line.startsWith('## ')) return <h2 key={i}>{line.slice(3)}</h2>;
+      if (line.startsWith('**') && line.endsWith('**'))
+        return <strong key={i} className="block mb-1">{line.slice(2, -2)}</strong>;
+      if (line.startsWith('*') && line.endsWith('*'))
+        return <em key={i} className="block mb-1">{line.slice(1, -1)}</em>;
+      if (line === '---') return <hr key={i} />;
       if (line.trim().startsWith('>')) {
         const match = line.match(/^((?:>\s?)+)\s*(.*)$/);
         if (match) {
-          const markers = match[1].match(/>/g) || [];
-          const level = markers.length;
+          const level = (match[1].match(/>/g) || []).length;
           const content = match[2];
-          const trimmedContent = content.trim();
-          const inlineContent =
-            /^\*\*u\/.+\*\*$/.test(trimmedContent) ? (
-              <strong>{trimmedContent.slice(2, -2)}</strong>
-            ) : (
-              <p>{content}</p>
-            );
-          let nestedContent: JSX.Element = inlineContent;
+          const trimmed = content.trim();
+          const inner = /^\*\*u\/.+\*\*$/.test(trimmed)
+            ? <strong>{trimmed.slice(2, -2)}</strong>
+            : <p>{content}</p>;
+          let node: JSX.Element = inner;
           for (let j = 0; j < level; j++) {
-            nestedContent = (
-              <blockquote key={`${i}-${j}`} className="border-l-4 border-gray-300 pl-2 mb-0">
-                {nestedContent}
-              </blockquote>
-            );
+            node = <blockquote key={`${i}-${j}`}>{node}</blockquote>;
           }
-          return nestedContent;
+          return node;
         }
       }
-      return line ? <p key={i} className="mb-2">{line}</p> : <br key={i} />;
+      return line ? <p key={i}>{line}</p> : <br key={i} />;
     });
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-xl p-6 relative">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-lg font-semibold">Generated Markdown</h2>
-        <div className="flex gap-2">
+    <div className="fade-in">
+      <div className="preview-controls">
+        <div className="preview-tabs">
           <button
-            onClick={() => setShowRaw(!showRaw)}
-            className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+            onClick={() => setShowRaw(false)}
+            className={`btn-tab ${!showRaw ? 'active' : ''}`}
           >
-            {showRaw ? 'Show Rendered' : 'Show Raw'}
+            Rendered
           </button>
           <button
-            onClick={copyToClipboard}
-            className="flex items-center gap-2 px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+            onClick={() => setShowRaw(true)}
+            className={`btn-tab ${showRaw ? 'active' : ''}`}
           >
-            {copied ? (
-              <>
-                <Check className="w-4 h-4 text-green-600" />
-                Copied!
-              </>
-            ) : (
-              <>
-                <Clipboard className="w-4 h-4" />
-                Copy
-              </>
-            )}
+            Raw
           </button>
         </div>
+        <button onClick={copyToClipboard} className="btn-tab">
+          {copied ? 'Copied' : 'Copy'}
+        </button>
       </div>
-      
-      <div className="bg-gray-50 p-4 rounded-md">
+
+      <div className="preview-body">
         {showRaw ? (
-          <pre className="whitespace-pre-wrap font-mono text-sm">{markdown}</pre>
+          <pre className="raw-output">{markdown}</pre>
         ) : (
-          <div className="prose max-w-none">{renderMarkdown(markdown)}</div>
+          <div className="md-rendered">{renderMarkdown(markdown)}</div>
         )}
       </div>
     </div>

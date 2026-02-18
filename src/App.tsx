@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Header } from './components/Header';
 import { RedditForm } from './components/RedditForm';
 import { MarkdownPreview } from './components/MarkdownPreview';
@@ -6,15 +6,42 @@ import { Footer } from './components/Footer';
 
 function App() {
   const [markdown, setMarkdown] = useState('');
+  const [url, setUrl] = useState('');
+  const hasContent = markdown.length > 0;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-100 via-white to-purple-100">
-      <div className="max-w-4xl mx-auto px-4 py-12">
-        <Header />
-        <RedditForm onSubmit={setMarkdown} />
-        {markdown && <MarkdownPreview markdown={markdown} />}
-        <Footer />
-      </div>
+    <div className="page">
+      {!hasContent ? (
+        <div className="hero">
+          <div className="container">
+            <Header />
+            <RedditForm
+              url={url}
+              onUrlChange={setUrl}
+              onSubmit={setMarkdown}
+            />
+          </div>
+        </div>
+      ) : (
+        <>
+          <hr className="rule" />
+          <div className="container toolbar-area">
+            <RedditForm
+              url={url}
+              onUrlChange={setUrl}
+              onSubmit={setMarkdown}
+              compact
+              onClear={() => setMarkdown('')}
+            />
+          </div>
+          <hr className="rule rule--thin" />
+          <div className="container content-area">
+            <MarkdownPreview markdown={markdown} />
+          </div>
+        </>
+      )}
+      <hr className="rule" />
+      <Footer />
     </div>
   );
 }
