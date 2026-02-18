@@ -1,90 +1,44 @@
 # Reddit Thread to Markdown Converter
 
-A beautiful and functional web app to convert Reddit threads into clean Markdown format for easy sharing, sentiment analysis, summarization, and more.
+A web app that converts Reddit threads into clean Markdown format. Paste a URL, get structured Markdown with nested comments preserved.
+
+Forked from [frankwiersma/reddit2markdown](https://github.com/frankwiersma/reddit2markdown) with added support for nested comment parsing.
 
 ## Features
 
-### 🌟 **Web Interface**
-- **Interactive Input:** Paste any Reddit thread URL to get started.
-- **One-Click Conversion:** Instantly transform Reddit threads into Markdown.
-- **Copy-to-Clipboard:** Easily copy raw Markdown for further use.
-- **Toggle View:** Switch between rendered and raw Markdown views.
+- Paste any Reddit thread URL and get Markdown output instantly
+- Nested comments rendered with proper hierarchy using blockquotes
+- Toggle between rendered and raw Markdown views
+- One-click copy to clipboard
+- No API keys required — uses Reddit's public `.json` endpoint
 
-### 📄 **Markdown Features**
-- **Post Details:** Includes title, content, and author metadata.
-- **Comment Parsing:** Processes nested Reddit comments with their original hierarchy.
-- **Structured Output:** Formats the post and comments in a clean Markdown layout.
+## Tech Stack
 
-### 🚀 **Technology**
-- **Frontend:** Built with React and Tailwind CSS for a responsive, modern design.
-- **Backend:** Utilizes Reddit's public `.json` endpoint for seamless data fetching without authentication.
-- **Deployment:** Hosted on Netlify for quick, scalable web delivery.
+- React 18 + TypeScript
+- Vite
+- Tailwind CSS
 
-
----
-
-## Installation
-
-Clone the repository:
-
-```bash
-git clone https://github.com/frankwiersma/reddit2markdown.git
-cd reddit2markdown
-```
-
-Install dependencies:
+## Local Development
 
 ```bash
 npm install
-```
-
-Run the development server:
-
-```bash
 npm run dev
 ```
 
----
+## Docker Deployment
 
-## Usage
+The app is containerized with a multi-stage build (Node for building, nginx for serving).
 
-1. Open the web app in your browser (`http://localhost:3000` when running locally).
-2. Enter a Reddit thread URL in the input field.
-3. Click "Convert" to generate the Markdown.
-4. View the formatted Markdown or toggle to raw view.
-5. Use the "Copy" button to save the Markdown to your clipboard.
+Build and run locally:
 
----
+```bash
+docker compose up -d --build
+```
 
-## Demo
+The app will be available at `http://localhost:8080`.
 
-Visit the live app: [https://reddit2markdown.osint-app.com/](https://reddit2markdown.osint-app.com/)
+To stop:
 
----
-
-## Contributing
-
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository.
-2. Create a new branch for your feature or bug fix.
-3. Commit your changes and push them to your branch.
-4. Submit a pull request with a detailed description of your changes.
-
----
-
-### Main Interface
-A sleek, intuitive input field with a "Convert" button.
-
-### Markdown Preview
-- **Rendered View:** Displays the converted thread in formatted Markdown.
-- **Raw View:** Shows the raw Markdown text.
-
----
-
-## Key Highlights
-
-- **No API Keys Required:** Access public Reddit data with no authentication hassle.
-- **User-Friendly Design:** Built with a focus on clarity and simplicity.
-- **Developer-Friendly:** Easily extendable and modular architecture.
-
+```bash
+docker compose down
+```
