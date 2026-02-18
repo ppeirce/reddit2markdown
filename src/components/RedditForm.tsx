@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface RedditFormProps {
   url: string;
@@ -6,11 +6,13 @@ interface RedditFormProps {
   onSubmit: (markdown: string) => void;
   compact?: boolean;
   onClear?: () => void;
+  autoConvert?: boolean;
 }
 
-export function RedditForm({ url, onUrlChange, onSubmit, compact, onClear }: RedditFormProps) {
+export function RedditForm({ url, onUrlChange, onSubmit, compact, onClear, autoConvert }: RedditFormProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const hasAutoConverted = useRef(false);
 
   const processComment = (comment: any, depth = 0): string => {
     const indent = "> ".repeat(depth);
@@ -33,8 +35,7 @@ export function RedditForm({ url, onUrlChange, onSubmit, compact, onClear }: Red
     return mdComment;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const convert = async () => {
     setLoading(true);
     setError('');
 
@@ -62,6 +63,18 @@ export function RedditForm({ url, onUrlChange, onSubmit, compact, onClear }: Red
       setLoading(false);
     }
   };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    convert();
+  };
+
+  useEffect(() => {
+    if (autoConvert && url && !hasAutoConverted.current) {
+      hasAutoConverted.current = true;
+      convert();
+    }
+  }, []);
 
   return (
     <form onSubmit={handleSubmit} className={compact ? 'form-compact' : ''}>

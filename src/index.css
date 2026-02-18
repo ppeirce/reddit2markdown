@@ -377,6 +377,30 @@ body {
   color: var(--ink);
 }
 
+/* ---- Bookmarklet ---- */
+
+.bookmarklet-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--stone);
+  margin-top: 2.5rem;
+}
+
+.bookmarklet-link {
+  color: var(--red);
+  text-decoration: none;
+  font-weight: 500;
+  padding: 2px 8px;
+  border: 1px solid var(--red);
+  transition: background 0.1s, color 0.1s;
+  cursor: grab;
+}
+
+.bookmarklet-link:hover {
+  background: var(--red);
+  color: #fff;
+}
+
 /* ---- Animation ---- */
 
 @keyframes fadeIn {

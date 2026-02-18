@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Header } from './components/Header';
 import { RedditForm } from './components/RedditForm';
 import { MarkdownPreview } from './components/MarkdownPreview';
@@ -6,7 +6,13 @@ import { Footer } from './components/Footer';
 
 function App() {
   const [markdown, setMarkdown] = useState('');
-  const [url, setUrl] = useState('');
+  const [url, setUrl] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('url') || '';
+  });
+  const shouldAutoConvert = useRef(
+    new URLSearchParams(window.location.search).has('url')
+  );
   const hasContent = markdown.length > 0;
 
   return (
@@ -19,7 +25,18 @@ function App() {
               url={url}
               onUrlChange={setUrl}
               onSubmit={setMarkdown}
+              autoConvert={shouldAutoConvert.current}
             />
+            <p className="bookmarklet-hint">
+              Drag to your bookmark bar:{' '}
+              <a
+                className="bookmarklet-link"
+                href={`javascript:void(window.open('${window.location.origin}?url='+encodeURIComponent(window.location.href)))`}
+                onClick={(e) => e.preventDefault()}
+              >
+                R→MD
+              </a>
+            </p>
           </div>
         </div>
       ) : (
