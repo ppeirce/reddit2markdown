@@ -329,7 +329,11 @@ body {
 .md-rendered blockquote {
   border-left: 3px solid var(--ink);
   padding-left: 1.25rem;
-  margin: 0 0 0.25rem;
+  margin: 0;
+}
+
+.md-rendered blockquote p {
+  margin-bottom: 0;
 }
 
 .md-rendered blockquote blockquote {
