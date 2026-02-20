@@ -1,5 +1,7 @@
 # R→MD
 
+**Live at [peirce.net/reddit](https://peirce.net/reddit)**
+
 Convert Reddit threads into clean, readable markdown. Paste a URL, get structured markdown with nested comments preserved as blockquotes.
 
 Forked from [frankwiersma/reddit2markdown](https://github.com/frankwiersma/reddit2markdown).
@@ -13,7 +15,7 @@ Forked from [frankwiersma/reddit2markdown](https://github.com/frankwiersma/reddi
 - **Bookmarklet** for one-click conversion from any Reddit page
 - **Query parameter support** — link directly to a converted thread via `?url=`
 - No API keys required — uses Reddit's public `.json` endpoint
-- No backend — everything runs client-side in the browser
+- Server-side proxy via Cloudflare Worker (avoids CORS and mobile browser issues)
 
 ## Tech Stack
 
@@ -22,7 +24,7 @@ Forked from [frankwiersma/reddit2markdown](https://github.com/frankwiersma/reddi
 - **Build Tool**: Vite 5
 - **Styling**: Tailwind CSS + custom CSS (Bureau design system)
 - **Fonts**: Bebas Neue, Space Grotesk, JetBrains Mono (Google Fonts)
-- **Deployment**: Docker (multi-stage build: Node → nginx)
+- **Deployment**: Cloudflare Pages + Workers (production), Docker (self-hosted)
 
 ## Prerequisites
 
@@ -64,12 +66,13 @@ No environment variables, no database, no API keys. It just runs.
 ### How It Works
 
 1. User pastes a Reddit thread URL
-2. The app appends `.json` to the URL and fetches it directly from Reddit's public API
-3. The JSON response is parsed client-side: post title, author, body text, and the full comment tree
-4. Comments are recursively processed into markdown using blockquote nesting (`>`, `> >`, `> > >`) to represent thread depth
-5. The result is displayed in a rendered view (custom markdown-to-JSX renderer) or as raw copyable text
+2. The client sends the URL to a same-origin proxy endpoint (`/api/fetch`)
+3. The Cloudflare Worker validates the URL (Reddit hosts only, HTTPS, thread path), fetches the `.json` endpoint from Reddit server-side, and returns the JSON
+4. The JSON response is parsed client-side: post title, author, body text, and the full comment tree
+5. Comments are recursively processed into markdown using blockquote nesting (`>`, `> >`, `> > >`) to represent thread depth
+6. The result is displayed in a rendered view (custom markdown-to-JSX renderer) or as raw copyable text
 
-There is no backend. The browser fetches from Reddit directly. This means CORS must be allowed by Reddit's servers, which it is for their public `.json` endpoints.
+The proxy eliminates cross-origin issues (Reddit's CORS preflight handling is broken on iOS Safari) and enforces security constraints: Reddit-host allowlist, HTTPS-only, GET-only, thread path validation, 10s timeout, 5MB size cap, and 60s edge caching.
 
 ### Directory Structure
 
@@ -87,6 +90,11 @@ There is no backend. The browser fetches from Reddit directly. This means CORS m
 ├── Dockerfile                      # Multi-stage build (node:20-alpine → nginx:alpine)
 ├── docker-compose.yml              # Single service, port 8080
 ├── nginx.conf                      # SPA fallback (try_files → /index.html)
+├── worker/
+│   ├── src/index.ts                # Cloudflare Worker: Reddit proxy + Pages router
+│   ├── test/                       # Worker test suite (vitest + workerd)
+│   ├── wrangler.toml               # Worker config and route binding
+│   └── vitest.config.ts            # Test runner config
 ├── STYLE_GUIDE.md                  # Bureau design system documentation
 ├── vite.config.ts                  # Vite config
 ├── tailwind.config.js              # Tailwind config
@@ -111,7 +119,7 @@ The URL is initialized from the `?url=` query parameter if present, enabling dee
 Append `?url=` with an encoded Reddit thread URL to auto-convert on page load:
 
 ```
-https://your-instance.com?url=https://www.reddit.com/r/subreddit/comments/abc123/thread_title/
+https://peirce.net/reddit?url=https://www.reddit.com/r/subreddit/comments/abc123/thread_title/
 ```
 
 This is what the bookmarklet uses under the hood.
@@ -139,6 +147,7 @@ javascript:void(window.open('http://your-instance:8080?url='+encodeURIComponent(
 | `npm run build` | Production build to `dist/` |
 | `npm run preview` | Serve the production build locally |
 | `npm run lint` | Run ESLint |
+| `cd worker && npm test` | Run Worker proxy test suite (30 tests) |
 
 ## Deployment
 
@@ -211,15 +220,15 @@ The visual design follows **Bureau**, an editorial brutalist design system docum
 
 ## Troubleshooting
 
-### "Could not fetch that thread"
+### Error Messages
 
-- Verify the URL is a valid Reddit thread (not a subreddit, user profile, or search page)
-- Reddit occasionally blocks requests from certain IPs or regions — try again after a moment
-- Some threads (removed, quarantined, or private subreddit posts) don't expose `.json` endpoints
+The app provides specific error messages for different failure modes:
 
-### CORS Issues
-
-If you see CORS errors in the browser console, Reddit may have changed their CORS policy for the `.json` endpoint. This app has no backend proxy — it relies on Reddit allowing cross-origin requests to their public JSON API.
+- **"That doesn't look like a Reddit thread URL"** — The URL must be a thread (`/r/.../comments/...`), not a subreddit listing, user profile, or search page
+- **"Reddit is rate-limiting requests"** — Reddit limits ~100 requests per 10 minutes. Wait a moment and retry
+- **"Reddit blocked this request"** — Some threads (removed, quarantined, private) aren't accessible via the public API
+- **"Reddit took too long to respond"** — The 10-second timeout was exceeded. Try again
+- **"Network error — could not reach the server"** — Check your internet connection
 
 ### Docker Build Fails
 
