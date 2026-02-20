@@ -2,16 +2,36 @@ import { useState } from 'react';
 
 interface MarkdownPreviewProps {
   markdown: string;
+  shareUrl: string;
+  title: string;
 }
 
-export function MarkdownPreview({ markdown }: MarkdownPreviewProps) {
+export function MarkdownPreview({ markdown, shareUrl, title }: MarkdownPreviewProps) {
   const [showRaw, setShowRaw] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [shared, setShared] = useState(false);
 
   const copyToClipboard = async () => {
     await navigator.clipboard.writeText(markdown);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const share = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, url: shareUrl });
+      } catch (err) {
+        // User cancelled or share failed — ignore AbortError
+        if (err instanceof Error && err.name !== 'AbortError') {
+          console.warn('[r2md] Share failed:', err);
+        }
+      }
+    } else {
+      await navigator.clipboard.writeText(shareUrl);
+      setShared(true);
+      setTimeout(() => setShared(false), 2000);
+    }
   };
 
   const decodeHTML = (text: string): string => {
@@ -67,9 +87,16 @@ export function MarkdownPreview({ markdown }: MarkdownPreviewProps) {
             Raw
           </button>
         </div>
-        <button onClick={copyToClipboard} className="btn-tab">
-          {copied ? 'Copied' : 'Copy'}
-        </button>
+        <div className="preview-tabs">
+          <button onClick={copyToClipboard} className="btn-tab">
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+          {shareUrl && (
+            <button onClick={share} className="btn-tab">
+              {shared ? 'Copied' : 'Share'}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="preview-body">

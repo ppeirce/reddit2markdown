@@ -6,6 +6,7 @@ import { Footer } from './components/Footer';
 
 function App() {
   const [markdown, setMarkdown] = useState('');
+  const [title, setTitle] = useState('');
   const [url, setUrl] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('url') || '';
@@ -14,6 +15,15 @@ function App() {
     new URLSearchParams(window.location.search).has('url')
   );
   const hasContent = markdown.length > 0;
+
+  const handleResult = ({ markdown, title }: { markdown: string; title: string }) => {
+    setMarkdown(markdown);
+    setTitle(title);
+  };
+
+  const shareUrl = url
+    ? `${window.location.origin}${window.location.pathname}?url=${encodeURIComponent(url)}`
+    : '';
 
   return (
     <div className="page">
@@ -24,7 +34,7 @@ function App() {
             <RedditForm
               url={url}
               onUrlChange={setUrl}
-              onSubmit={setMarkdown}
+              onSubmit={handleResult}
               autoConvert={shouldAutoConvert.current}
             />
             <p className="bookmarklet-hint">
@@ -46,14 +56,14 @@ function App() {
             <RedditForm
               url={url}
               onUrlChange={setUrl}
-              onSubmit={setMarkdown}
+              onSubmit={handleResult}
               compact
-              onClear={() => setMarkdown('')}
+              onClear={() => { setMarkdown(''); setTitle(''); }}
             />
           </div>
           <hr className="rule rule--thin" />
           <div className="container content-area">
-            <MarkdownPreview markdown={markdown} />
+            <MarkdownPreview markdown={markdown} shareUrl={shareUrl} title={title} />
           </div>
         </>
       )}

@@ -3,10 +3,23 @@ import React, { useEffect, useRef, useState } from 'react';
 interface RedditFormProps {
   url: string;
   onUrlChange: (url: string) => void;
-  onSubmit: (markdown: string) => void;
+  onSubmit: (result: { markdown: string; title: string }) => void;
   compact?: boolean;
   onClear?: () => void;
   autoConvert?: boolean;
+}
+
+function titleFromSlug(url: string): string | null {
+  try {
+    const segments = new URL(url).pathname.split('/').filter(Boolean);
+    // /r/<sub>/comments/<id>/<slug>
+    const slug = segments[4];
+    if (!slug) return null;
+    const title = slug.replace(/_/g, ' ');
+    return title.charAt(0).toUpperCase() + title.slice(1);
+  } catch {
+    return null;
+  }
 }
 
 export function RedditForm({ url, onUrlChange, onSubmit, compact, onClear, autoConvert }: RedditFormProps) {
@@ -127,7 +140,7 @@ export function RedditForm({ url, onUrlChange, onSubmit, compact, onClear, autoC
         }
       });
 
-      onSubmit(md);
+      onSubmit({ markdown: md, title: post.title });
     } catch (err) {
       console.error('[r2md] Unexpected error:', err);
       setError(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
@@ -160,7 +173,7 @@ export function RedditForm({ url, onUrlChange, onSubmit, compact, onClear, autoC
           className="form-input"
         />
         <button type="submit" disabled={loading} className="btn-primary">
-          {loading ? 'Working\u2026' : 'Convert \u2192'}
+          {loading ? 'Converting\u2026' : 'Convert \u2192'}
         </button>
         {compact && onClear && (
           <button type="button" onClick={onClear} className="btn-text">
@@ -168,6 +181,9 @@ export function RedditForm({ url, onUrlChange, onSubmit, compact, onClear, autoC
           </button>
         )}
       </div>
+      {loading && titleFromSlug(url) && (
+        <p className="loading-hint">Converting &ldquo;{titleFromSlug(url)}&rdquo;&hellip;</p>
+      )}
       {error && <p className="error-msg">{error}</p>}
     </form>
   );
