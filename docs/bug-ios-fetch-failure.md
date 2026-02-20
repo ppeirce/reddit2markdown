@@ -1,7 +1,7 @@
 # Bug: "Could not fetch that thread" on iPhone
 
 **Reported:** 2026-02-20
-**Status:** Investigated — fix pending
+**Status:** Root cause confirmed — fix deployed
 **Severity:** Medium (platform-specific, inconsistent)
 
 ## Report
@@ -126,8 +126,8 @@ confirmation via an actual iOS Safari network trace.
 | Code doesn't check `response.ok` before `.json()` | **Confirmed** (code review) |
 | All errors produce same generic message | **Confirmed** (code review) |
 | Reddit rate-limits at ~100 req/10min per IP | **Confirmed** (response headers) |
-| iOS Safari sends OPTIONS preflight for this request | **Hypothesis** (no network trace) |
-| iOS ITP interferes with cross-origin fetch | **Hypothesis** (no network trace) |
+| iOS Safari blocks cross-origin fetch to Reddit | **Confirmed** (users see "CORS or network" TypeError) |
+| Exact iOS trigger (preflight vs ITP vs other) | **Unconfirmed** (no network trace of specific mechanism) |
 | Cellular carrier NAT exhausts rate limit | **Plausible** (no user network info) |
 
 ## Why "Inconsistent"
@@ -286,15 +286,36 @@ To verify the fix across the conditions most likely to trigger the original bug:
 For each row, test with the original report URL:
 `https://www.reddit.com/r/movies/comments/1q51kqe/dead_poets_society_what_a_movie/`
 
-## Next Steps to Confirm Hypotheses
+## Resolution
 
-Before or during implementation, the following would turn hypotheses into
-confirmed findings:
+### Diagnostic phase (2026-02-20)
 
-1. **iOS Safari network trace**: Use Safari Web Inspector (Mac → iPhone via
-   cable) to capture the actual network request from iOS Safari. Check whether an
-   OPTIONS preflight is sent, and what error appears in the console (`TypeError`
-   vs `SyntaxError` disambiguates CORS block vs HTML parse failure).
-2. **Reddit response on cellular IP**: Run the curl tests from a cellular
-   hotspot to check whether rate limits are already partially consumed on
-   carrier NAT IPs.
+Deployed structured error handling to the client that distinguishes CORS/network
+errors, HTTP status errors, content-type mismatches, JSON parse failures, and
+unexpected response shapes. iPhone users confirmed seeing:
+
+> Network error — could not reach Reddit (CORS or network)
+
+This is a `TypeError` thrown by `fetch()` itself — the browser blocks the request
+before receiving any response. This confirms the CORS/network block hypothesis
+and rules out rate limiting, Reddit 403s, and response parsing as the cause.
+
+### Fix (2026-02-20)
+
+Deployed a server-side proxy at `/reddit/api/fetch` in the Cloudflare Worker.
+The client now makes a same-origin request to the proxy, which fetches Reddit's
+`.json` endpoint server-side and returns the data. This eliminates all
+browser-mediated cross-origin behavior.
+
+The exact iOS Safari trigger (CORS preflight vs ITP vs other) remains
+unconfirmed, but the proxy makes it moot — there is no longer a cross-origin
+request for the browser to block.
+
+## Remaining open questions
+
+1. **Exact iOS Safari mechanism**: A Safari Web Inspector network trace would
+   confirm whether iOS sends an OPTIONS preflight or blocks the request via ITP.
+   Academic at this point since the proxy bypasses the issue entirely.
+2. **Pages auto-deploy**: The Cloudflare Pages build config has a broken deploy
+   command (`npx wrangler deploy`) that should be removed. Auto-deploy from
+   GitHub pushes is currently not working.
