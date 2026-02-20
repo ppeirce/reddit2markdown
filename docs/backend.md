@@ -14,11 +14,10 @@ If you're a senior engineer unfamiliar with this stack, this document should giv
 4. [The Recursive Comment Tree Algorithm](#4-the-recursive-comment-tree-algorithm)
 5. [The Markdown Renderer](#5-the-markdown-renderer)
 6. [The Build System: Vite + TypeScript + PostCSS](#6-the-build-system-vite--typescript--postcss)
-7. [The Serving Layer: Docker + nginx](#7-the-serving-layer-docker--nginx)
-8. [The Deployment Architecture](#8-the-deployment-architecture)
-9. [URL Routing and Deep Linking](#9-url-routing-and-deep-linking)
-10. [Security Considerations](#10-security-considerations)
-11. [Failure Modes](#11-failure-modes)
+7. [The Serving and Deployment Layer: Cloudflare](#7-the-serving-and-deployment-layer-cloudflare)
+8. [URL Routing and Deep Linking](#8-url-routing-and-deep-linking)
+9. [Security Considerations](#9-security-considerations)
+10. [Failure Modes](#10-failure-modes)
 
 ---
 
@@ -651,214 +650,65 @@ The `content` array tells Tailwind where to look for class usage. Tailwind then 
 
 ---
 
-## 7. The Serving Layer: Docker + nginx
+## 7. The Serving and Deployment Layer: Cloudflare
 
-### Multi-stage Docker build
+The app is served entirely through Cloudflare's edge network via two services:
 
-The `Dockerfile` uses a multi-stage build pattern:
+### Cloudflare Pages (frontend)
 
-```dockerfile
-# ── Stage 1: Build ──────────────────────────────────────────
-FROM node:20-alpine AS build
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
+[Cloudflare Pages](https://pages.cloudflare.com/) hosts the static frontend files (HTML, CSS, JS). The project `r2md` is configured for direct upload (no git integration). Deployment is a local build followed by a wrangler upload:
 
-# ── Stage 2: Serve ──────────────────────────────────────────
-FROM nginx:alpine
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/dist /usr/share/nginx/html
-EXPOSE 80
+```bash
+VITE_BASE_PATH=/reddit/ npx vite build
+npx wrangler pages deploy dist --project-name r2md
 ```
 
-**Why two stages?**
+**Critical detail:** `VITE_BASE_PATH=/reddit/` is required because the app is served at `peirce.net/reddit/`, not at the root. This env var sets Vite's `base` config, which prefixes all asset URLs in the generated HTML. Without it, the HTML references `/assets/index-XXXX.js` instead of `/reddit/assets/index-XXXX.js`, and the Worker's route matching (which only handles `/reddit*`) won't serve the assets.
 
-The build stage needs Node.js, npm, and all dev dependencies (TypeScript compiler, Vite, Tailwind, etc.) — this is a ~300MB image. The serve stage only needs nginx and three static files — this is a ~40MB image. The multi-stage build gives you the build tools temporarily, extracts the output, and discards everything else. The final image never contains Node.js, `node_modules`, or source code.
+Pages assigns each deployment a unique preview URL (e.g., `https://a1b2c3d4.r2md.pages.dev`) in addition to the production URL (`r2md.pages.dev`). This is useful for testing before promoting.
 
-**Layer caching:**
+### Cloudflare Worker (router + proxy)
 
-```dockerfile
-COPY package.json package-lock.json ./    # Layer 1: dependency manifest
-RUN npm ci                                 # Layer 2: installed dependencies
-COPY . .                                   # Layer 3: source code
-RUN npm run build                          # Layer 4: build output
+The Worker (`worker/src/index.ts`) is bound to the route `peirce.net/reddit*` and serves two roles:
+
+1. **Pages router**: Requests to `peirce.net/reddit/*` (except the API endpoint) are proxied to `r2md.pages.dev` with the `/reddit` prefix stripped
+2. **Reddit proxy**: Requests to `peirce.net/reddit/api/fetch?url=...` are handled by the proxy, which validates the URL, fetches from Reddit server-side, and returns the JSON with 60s edge caching
+
+The Worker is deployed independently:
+
+```bash
+cd worker && npx wrangler deploy
 ```
 
-Docker caches layers. If `package.json` and `package-lock.json` haven't changed, layers 1 and 2 are cached and `npm ci` doesn't re-run. Only layers 3 and 4 (copy source + build) execute. This makes rebuilds after source-only changes take ~2-3 seconds instead of ~30 seconds.
-
-**`npm ci` vs `npm install`:**
-
-`npm ci` is used instead of `npm install` because:
-- It installs from `package-lock.json` exactly (deterministic)
-- It deletes `node_modules` first (clean slate)
-- It's faster for CI/Docker builds
-- It fails if `package-lock.json` is out of sync with `package.json`
-
-### nginx configuration
-
-```nginx
-server {
-    listen 80;
-    root /usr/share/nginx/html;
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
-```
-
-This is a standard **SPA fallback** configuration. Here's what `try_files` does:
+### Request routing
 
 ```
-Request: GET /some/path
-
-try_files $uri           → Does /usr/share/nginx/html/some/path exist as a file? No.
-          $uri/          → Does /usr/share/nginx/html/some/path/ exist as a directory? No.
-          /index.html    → Serve /usr/share/nginx/html/index.html instead.
+peirce.net/reddit*  →  Cloudflare Worker
+    │
+    ├─ /reddit/api/fetch?url=...  →  handleRedditProxy()  →  Reddit .json API
+    │                                                          (cached 60s)
+    │
+    └─ /reddit/*                  →  handlePagesProxy()    →  r2md.pages.dev
+                                                               (static files)
 ```
 
-**Why is this necessary?**
+### Deployment workflow
 
-R→MD uses query parameters (`?url=...`) rather than path-based routing, so this fallback isn't strictly critical today. But it's protective: if someone navigates directly to any path (e.g., bookmarks a URL with a path), nginx serves `index.html` instead of returning 404. The React app then handles routing client-side.
+There is no CI/CD pipeline. Deployment is two manual commands:
 
-For static assets (CSS, JS files with hashed names), `$uri` matches on the first try and the file is served directly.
+```bash
+# Frontend
+VITE_BASE_PATH=/reddit/ npx vite build && npx wrangler pages deploy dist --project-name r2md
 
-### Docker Compose
-
-```yaml
-services:
-  reddit2markdown:
-    build: .
-    ports:
-      - "8080:80"
-    restart: unless-stopped
+# Worker (only when worker/src/index.ts changes)
+cd worker && npx wrangler deploy
 ```
 
-- `build: .` — builds from the Dockerfile in the current directory
-- `ports: "8080:80"` — maps host port 8080 to container port 80 (nginx)
-- `restart: unless-stopped` — automatically restarts the container after crashes or host reboots, unless explicitly stopped with `docker compose down`
-
-### .dockerignore
-
-```
-node_modules
-.git
-.DS_Store
-.bolt
-```
-
-These are excluded from the Docker build context (the files sent to the Docker daemon). This is critical for performance: `node_modules` alone is ~200MB. Without `.dockerignore`, Docker would copy all of `node_modules` into the build context only to delete it and reinstall with `npm ci`.
+The frontend and Worker are deployed independently — a frontend change doesn't require a Worker deploy, and vice versa.
 
 ---
 
-## 8. The Deployment Architecture
-
-### Physical topology
-
-```
-┌─────────────────────┐          ┌─────────────────────────────────┐
-│  Development Mac     │   SSH    │  Intel MacBook Pro (intel-mbp)  │
-│  (local machine)     │─────────>│  headless server                │
-│                      │  rsync   │                                 │
-│  Source code lives   │─────────>│  ┌─────────────────────┐       │
-│  here. Edits happen  │          │  │  OrbStack            │       │
-│  here.               │          │  │  (Docker runtime)    │       │
-│                      │          │  │                      │       │
-│                      │          │  │  ┌────────────────┐ │       │
-│                      │          │  │  │  Container      │ │       │
-│                      │          │  │  │  nginx :80      │ │       │
-│                      │          │  │  │  mapped → :8080 │ │       │
-│                      │          │  │  └────────────────┘ │       │
-│                      │          │  └─────────────────────┘       │
-└─────────────────────┘          └─────────────────────────────────┘
-                                          │
-                                          │  http://intel-mbp:8080
-                                          ▼
-                                   ┌─────────────┐
-                                   │  Browser     │
-                                   │  (any device │
-                                   │  on network) │
-                                   └─────────────┘
-```
-
-### OrbStack
-
-[OrbStack](https://orbstack.dev/) is the Docker runtime on the Intel MacBook Pro. It's an alternative to Docker Desktop for macOS. It provides the `docker` and `docker compose` CLI commands but runs as a lightweight background service.
-
-**Critical detail:** OrbStack installs its binaries to `~/.orbstack/bin/`, which is NOT in `$PATH` during non-interactive SSH sessions. Every remote Docker command must explicitly set the PATH:
-
-```bash
-ssh peterpeirce@intel-mbp "export PATH=\$HOME/.orbstack/bin:\$PATH && docker compose up -d --build"
-```
-
-Without this PATH prefix, `docker` commands will fail with "command not found" even though they work fine in an interactive terminal.
-
-### The deployment workflow
-
-There is no CI/CD pipeline. Deployment is manual and takes ~10 seconds:
-
-**Step 1: Rsync source files to the remote host**
-
-```bash
-rsync -av \
-  --exclude='node_modules' \
-  --exclude='.git' \
-  --exclude='.DS_Store' \
-  --exclude='dist' \
-  /Users/peter/projects/reddit2markdown/ \
-  peterpeirce@intel-mbp:~/projects/reddit2markdown/
-```
-
-Flags:
-- `-a` (archive): preserves permissions, timestamps, symlinks, recursive
-- `-v` (verbose): shows transferred files
-- `--exclude`: skip files that either don't belong on the server or would be regenerated
-
-Note the trailing `/` on the source path — this means "copy the contents of this directory" rather than "copy the directory itself." Without it, you'd get `reddit2markdown/reddit2markdown/` on the remote.
-
-**Step 2: Build and deploy the container**
-
-```bash
-ssh peterpeirce@intel-mbp \
-  "export PATH=\$HOME/.orbstack/bin:\$PATH && \
-   cd ~/projects/reddit2markdown && \
-   docker compose up -d --build"
-```
-
-`docker compose up -d --build` does three things:
-1. `--build`: Rebuilds the Docker image from the Dockerfile
-2. Recreates the container if the image changed
-3. `-d`: Runs in detached mode (background)
-
-If only source files changed (not `package.json`), Docker's layer cache means `npm ci` is skipped and the build takes ~2-3 seconds.
-
-**Step 3: Verify**
-
-```bash
-curl -s -o /dev/null -w '%{http_code}' http://intel-mbp:8080
-# Should return: 200
-```
-
-### Why this works at this scale
-
-This manual workflow is intentionally simple. There's no build server, no container registry, no orchestrator. The tradeoffs:
-
-| Property | Status | Notes |
-|----------|--------|-------|
-| **Zero-downtime deploy** | No | Container restarts during rebuild (~2s downtime) |
-| **Rollback** | Manual | `git revert` + redeploy |
-| **Deploy time** | ~10s | rsync (~1s) + build (~3s) + container restart (~1s) |
-| **Multiple instances** | No | Single container, single host |
-| **HTTPS** | No | HTTP only, accessible on local network |
-
-For a single-user tool on a home network, this is the right level of infrastructure.
-
----
-
-## 9. URL Routing and Deep Linking
+## 8. URL Routing and Deep Linking
 
 ### Query parameter initialization
 
@@ -928,7 +778,7 @@ The `onClick={(e) => e.preventDefault()}` prevents the bookmarklet from executin
 
 ---
 
-## 10. Security Considerations
+## 9. Security Considerations
 
 ### No secrets
 
@@ -968,7 +818,7 @@ The bookmarklet link has a `javascript:` URI in its `href`. This is inherently a
 
 ---
 
-## 11. Failure Modes
+## 10. Failure Modes
 
 ### Network failures
 
@@ -995,20 +845,11 @@ The direct fetch failure is instant (CORS `TypeError` is not a timeout), so the 
 | Thread has zero comments | `data[1].data.children` is empty → no comments in output (not an error) |
 | Comment body is `null` (deleted comment) | `.split('\n')` on `null` → `TypeError` → caught |
 
-### Container failures
-
-| Scenario | Result | Recovery |
-|----------|--------|----------|
-| Container crashes | `restart: unless-stopped` auto-restarts it | Automatic |
-| Host machine reboots | OrbStack + Docker restart policy bring it back | Automatic |
-| OrbStack not running | Container won't start | Run `open -a OrbStack` on the host |
-| Port 8080 already in use | Container fails to bind | Stop the conflicting process or change the port in `docker-compose.yml` |
-| Disk full | Docker build fails | Free disk space, then rebuild |
-
-### Build failures
+### Build and deploy failures
 
 | Scenario | Cause | Fix |
 |----------|-------|-----|
-| `npm ci` fails | `package-lock.json` out of sync | Run `npm install` locally, commit the lock file |
 | TypeScript errors | Type errors in source | Fix the errors (build is strict) |
 | Vite build fails | Import errors, missing modules | Check imports and dependencies |
+| Assets 404 on peirce.net/reddit | Built without `VITE_BASE_PATH=/reddit/` | Rebuild with the env var and redeploy to Pages |
+| Worker deploy fails | Wrangler auth or config issue | Check `wrangler whoami` and `worker/wrangler.toml` |

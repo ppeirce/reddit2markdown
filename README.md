@@ -24,13 +24,12 @@ Forked from [frankwiersma/reddit2markdown](https://github.com/frankwiersma/reddi
 - **Build Tool**: Vite 5
 - **Styling**: Tailwind CSS + custom CSS (Bureau design system)
 - **Fonts**: Bebas Neue, Space Grotesk, JetBrains Mono (Google Fonts)
-- **Deployment**: Cloudflare Pages + Workers (production), Docker (self-hosted)
+- **Deployment**: Cloudflare Pages + Workers
 
 ## Prerequisites
 
 - Node.js 20+
 - npm
-- Docker and Docker Compose (for containerized deployment only)
 
 ## Getting Started
 
@@ -89,9 +88,6 @@ The proxy enforces security constraints: Reddit-host allowlist, HTTPS-only, GET-
 │       ├── MarkdownPreview.tsx     # Rendered/raw toggle, copy, markdown-to-JSX renderer
 │       └── Footer.tsx              # Site footer
 ├── index.html                      # HTML shell, Google Fonts
-├── Dockerfile                      # Multi-stage build (node:20-alpine → nginx:alpine)
-├── docker-compose.yml              # Single service, port 8080
-├── nginx.conf                      # SPA fallback (try_files → /index.html)
 ├── worker/
 │   ├── src/index.ts                # Cloudflare Worker: Reddit proxy + Pages router
 │   ├── test/                       # Worker test suite (vitest + workerd)
@@ -153,62 +149,31 @@ javascript:void(window.open('http://your-instance:8080?url='+encodeURIComponent(
 
 ## Deployment
 
-### Docker (Recommended)
+The app is deployed to **Cloudflare Pages** (frontend) and **Cloudflare Workers** (proxy/router). There are two independent deploy steps:
 
-The app uses a multi-stage Docker build:
-1. **Build stage**: `node:20-alpine` runs `npm ci` and `npm run build` to produce static files in `dist/`
-2. **Serve stage**: `nginx:alpine` serves the static files with SPA fallback routing
-
-Build and run locally:
+### Frontend (Pages)
 
 ```bash
-docker compose up -d --build
+VITE_BASE_PATH=/reddit/ npx vite build && npx wrangler pages deploy dist --project-name r2md
 ```
 
-The app will be available at [http://localhost:8080](http://localhost:8080).
+`VITE_BASE_PATH=/reddit/` is required — the app is served at `peirce.net/reddit/`, so asset paths must be prefixed accordingly.
 
-To stop:
+### Worker (proxy + router)
 
 ```bash
-docker compose down
+cd worker && npx wrangler deploy
 ```
 
-### Deploy to a Remote Host
+The Worker handles two roles: routing `peirce.net/reddit*` requests to Cloudflare Pages, and serving the Reddit proxy at `/reddit/api/fetch`.
 
-The production instance runs on a remote machine via Docker (OrbStack). The deployment workflow:
-
-1. **Rsync** project files to the remote host (excludes `node_modules`, `.git`, `dist`):
+### Verify
 
 ```bash
-rsync -av --exclude='node_modules' --exclude='.git' --exclude='.DS_Store' --exclude='dist' \
-  ./ user@remote-host:~/projects/reddit2markdown/
-```
-
-2. **Build and start** the container on the remote host:
-
-```bash
-ssh user@remote-host "cd ~/projects/reddit2markdown && docker compose up -d --build"
-```
-
-3. **Verify** the deployment:
-
-```bash
-curl -s -o /dev/null -w '%{http_code}' http://remote-host:8080
+curl -s -o /dev/null -w '%{http_code}' https://peirce.net/reddit/
 ```
 
 Should return `200`.
-
-The entire cycle (rsync + build + deploy) takes under 10 seconds. There's no CI/CD pipeline — this manual workflow is fast enough for a single-maintainer project.
-
-### Iterating
-
-For rapid development against the deployed instance:
-
-1. Make changes locally
-2. Rsync + rebuild on the remote host (steps 1–2 above)
-3. Hard-refresh the browser
-
-The Docker build caches the `npm ci` layer, so rebuilds that only change source files complete in ~3 seconds.
 
 ## Design System
 
@@ -232,13 +197,3 @@ The app provides specific error messages for different failure modes:
 - **"Reddit took too long to respond"** — The 10-second timeout was exceeded. Try again
 - **"Network error — could not reach the server"** — Check your internet connection
 
-### Docker Build Fails
-
-If `npm ci` fails during the Docker build, ensure `package-lock.json` is committed and up to date:
-
-```bash
-npm install
-git add package-lock.json
-```
-
-Then rebuild.
