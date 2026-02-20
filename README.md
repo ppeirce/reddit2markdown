@@ -15,7 +15,7 @@ Forked from [frankwiersma/reddit2markdown](https://github.com/frankwiersma/reddi
 - **Bookmarklet** for one-click conversion from any Reddit page
 - **Query parameter support** — link directly to a converted thread via `?url=`
 - No API keys required — uses Reddit's public `.json` endpoint
-- Server-side proxy via Cloudflare Worker (avoids CORS and mobile browser issues)
+- Hybrid fetch: direct request (user's IP) with automatic proxy fallback via Cloudflare Worker
 
 ## Tech Stack
 
@@ -66,13 +66,15 @@ No environment variables, no database, no API keys. It just runs.
 ### How It Works
 
 1. User pastes a Reddit thread URL
-2. The client sends the URL to a same-origin proxy endpoint (`/api/fetch`)
-3. The Cloudflare Worker validates the URL (Reddit hosts only, HTTPS, thread path), fetches the `.json` endpoint from Reddit server-side, and returns the JSON
+2. The client tries a direct `fetch()` to Reddit's `.json` endpoint (with `cache: 'no-store'` to bypass Safari's CORS cache bug — see below)
+3. If direct fetch fails (e.g. CORS block, rate limit), the client falls back to a same-origin proxy (`/api/fetch`) powered by a Cloudflare Worker
 4. The JSON response is parsed client-side: post title, author, body text, and the full comment tree
 5. Comments are recursively processed into markdown using blockquote nesting (`>`, `> >`, `> > >`) to represent thread depth
 6. The result is displayed in a rendered view (custom markdown-to-JSX renderer) or as raw copyable text
 
-The proxy eliminates cross-origin issues (Reddit's CORS preflight handling is broken on iOS Safari) and enforces security constraints: Reddit-host allowlist, HTTPS-only, GET-only, thread path validation, 10s timeout, 5MB size cap, and 60s edge caching.
+**Why the hybrid approach?** Direct fetch uses the user's own IP, distributing Reddit's rate limit (~100 req/10min) across all users. The proxy fallback exists for clients where direct fetch fails — most commonly iOS Safari, which has a WebKit bug where the browser's HTTP cache can contain non-CORS responses from prior reddit.com visits, causing cross-origin `fetch()` to fail even though Reddit returns `Access-Control-Allow-Origin: *`. The `cache: 'no-store'` option fixes this for most cases; the proxy catches the rest.
+
+The proxy enforces security constraints: Reddit-host allowlist, HTTPS-only, GET-only, thread path validation, 10s timeout, 5MB size cap, and 60s edge caching.
 
 ### Directory Structure
 

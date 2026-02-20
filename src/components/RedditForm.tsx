@@ -40,58 +40,74 @@ export function RedditForm({ url, onUrlChange, onSubmit, compact, onClear, autoC
     setError('');
 
     try {
-      const proxyUrl = `${import.meta.env.BASE_URL}api/fetch?url=${encodeURIComponent(url)}`;
-
-      let response: Response;
-      try {
-        response = await fetch(proxyUrl);
-      } catch (fetchErr) {
-        console.error('[r2md] fetch failed:', fetchErr);
-        setError('Network error — could not reach the server');
-        return;
-      }
-
-      // Proxy returns structured JSON errors for non-200 responses
-      if (!response.ok) {
-        let errorBody: { error?: string; message?: string } = {};
-        try {
-          errorBody = await response.json();
-        } catch {
-          // non-JSON error response
-        }
-        const code = errorBody.error || 'unknown';
-        console.error(`[r2md] Proxy returned ${response.status}: ${code}`);
-
-        const messages: Record<string, string> = {
-          rate_limited: 'Reddit is rate-limiting requests — try again in a minute',
-          upstream_forbidden: 'Reddit blocked this request — try again later',
-          upstream_timeout: 'Reddit took too long to respond — try again',
-          upstream_unreachable: 'Could not reach Reddit — try again later',
-          upstream_error: errorBody.message || 'Reddit returned an error',
-          upstream_parse_error: 'Got an unexpected response from Reddit',
-          response_too_large: 'That thread is too large to convert',
-          invalid_url: 'That doesn\u2019t look like a valid URL',
-          invalid_path: 'That doesn\u2019t look like a Reddit thread URL',
-          host_not_allowed: 'Only Reddit URLs are supported',
-        };
-        setError(messages[code] || errorBody.message || `Something went wrong (${code})`);
-        return;
-      }
-
-      const contentType = response.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        console.error(`[r2md] Expected JSON but got content-type: ${contentType}`);
-        setError('Got an unexpected response from the server');
-        return;
-      }
-
       let data: any;
+
+      // Try direct fetch first (user's own IP, distributed rate limit).
+      // cache: 'no-store' bypasses Safari's HTTP cache, which can contain
+      // non-CORS responses from prior reddit.com visits that block fetch().
+      const cleanUrl = url.replace(/\/?(\?.*)?$/, '');
+      const jsonUrl = cleanUrl + '.json';
+
       try {
-        data = await response.json();
-      } catch (parseErr) {
-        console.error('[r2md] JSON parse failed:', parseErr);
-        setError('Got an invalid response from the server');
-        return;
+        const directRes = await fetch(jsonUrl, { cache: 'no-store' });
+        if (!directRes.ok) throw new Error(`HTTP ${directRes.status}`);
+        data = await directRes.json();
+      } catch (directErr) {
+        // Direct failed (e.g. CORS on iOS Safari) — fall back to proxy
+        console.warn('[r2md] Direct fetch failed, using proxy:', directErr);
+
+        const proxyUrl = `${import.meta.env.BASE_URL}api/fetch?url=${encodeURIComponent(url)}`;
+
+        let response: Response;
+        try {
+          response = await fetch(proxyUrl);
+        } catch (fetchErr) {
+          console.error('[r2md] Proxy fetch failed:', fetchErr);
+          setError('Network error — could not reach the server');
+          return;
+        }
+
+        // Proxy returns structured JSON errors for non-200 responses
+        if (!response.ok) {
+          let errorBody: { error?: string; message?: string } = {};
+          try {
+            errorBody = await response.json();
+          } catch {
+            // non-JSON error response
+          }
+          const code = errorBody.error || 'unknown';
+          console.error(`[r2md] Proxy error: ${response.status} ${code}`);
+
+          const messages: Record<string, string> = {
+            rate_limited: 'Reddit is rate-limiting requests — try again in a minute',
+            upstream_forbidden: 'Reddit blocked this request — try again later',
+            upstream_timeout: 'Reddit took too long to respond — try again',
+            upstream_unreachable: 'Could not reach Reddit — try again later',
+            upstream_error: errorBody.message || 'Reddit returned an error',
+            upstream_parse_error: 'Got an unexpected response from Reddit',
+            response_too_large: 'That thread is too large to convert',
+            invalid_url: 'That doesn\u2019t look like a valid URL',
+            invalid_path: 'That doesn\u2019t look like a Reddit thread URL',
+            host_not_allowed: 'Only Reddit URLs are supported',
+          };
+          setError(messages[code] || errorBody.message || `Something went wrong (${code})`);
+          return;
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          console.error(`[r2md] Expected JSON but got content-type: ${contentType}`);
+          setError('Got an unexpected response from the server');
+          return;
+        }
+
+        try {
+          data = await response.json();
+        } catch (parseErr) {
+          console.error('[r2md] JSON parse failed:', parseErr);
+          setError('Got an invalid response from the server');
+          return;
+        }
       }
 
       if (!Array.isArray(data) || !data[0]?.data?.children?.[0]?.data) {
