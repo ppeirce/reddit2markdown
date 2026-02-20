@@ -31,7 +31,7 @@ function App() {
               Drag to your bookmark bar:{' '}
               <a
                 className="bookmarklet-link"
-                href={`javascript:void(window.open('${window.location.origin}?url='+encodeURIComponent(window.location.href)))`}
+                href={`javascript:void(window.open('${window.location.origin + window.location.pathname.replace(/\/$/, '')}?url='+encodeURIComponent(window.location.href)))`}
                 onClick={(e) => e.preventDefault()}
               >
                 R→MD
