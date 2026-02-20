@@ -41,8 +41,51 @@ export function RedditForm({ url, onUrlChange, onSubmit, compact, onClear, autoC
 
     try {
       const jsonUrl = url.replace(/\/?$/, '.json');
-      const response = await fetch(jsonUrl);
-      const data = await response.json();
+
+      let response: Response;
+      try {
+        response = await fetch(jsonUrl);
+      } catch (fetchErr) {
+        // TypeError: Failed to fetch → CORS block or network error
+        console.error('[r2md] fetch failed:', fetchErr);
+        setError(`Network error — could not reach Reddit (${fetchErr instanceof TypeError ? 'CORS or network' : String(fetchErr)})`);
+        return;
+      }
+
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type') || 'unknown';
+        console.error(`[r2md] Reddit returned HTTP ${response.status} (${contentType})`);
+        if (response.status === 429) {
+          setError(`Reddit is rate-limiting requests (HTTP 429) — try again in a minute`);
+        } else if (response.status === 403) {
+          setError(`Reddit blocked this request (HTTP 403)`);
+        } else {
+          setError(`Reddit returned an error (HTTP ${response.status})`);
+        }
+        return;
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        console.error(`[r2md] Expected JSON but got content-type: ${contentType}`);
+        setError(`Reddit returned non-JSON response (${contentType || 'no content-type'})`);
+        return;
+      }
+
+      let data: any;
+      try {
+        data = await response.json();
+      } catch (parseErr) {
+        console.error('[r2md] JSON parse failed:', parseErr);
+        setError('Reddit returned invalid JSON');
+        return;
+      }
+
+      if (!Array.isArray(data) || !data[0]?.data?.children?.[0]?.data) {
+        console.error('[r2md] Unexpected JSON shape:', JSON.stringify(data).slice(0, 200));
+        setError('Unexpected response structure — is this a Reddit thread URL?');
+        return;
+      }
 
       const post = data[0].data.children[0].data;
       let md = `# ${post.title}\n\n`;
@@ -57,8 +100,8 @@ export function RedditForm({ url, onUrlChange, onSubmit, compact, onClear, autoC
 
       onSubmit(md);
     } catch (err) {
-      setError('Could not fetch that thread');
-      console.error(err);
+      console.error('[r2md] Unexpected error:', err);
+      setError(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
